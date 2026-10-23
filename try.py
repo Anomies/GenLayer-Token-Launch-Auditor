@@ -3,7 +3,6 @@ from genlayer import *
 import typing
 from dataclasses import dataclass
 
-# Depolama (Storage) için özel bir veri yapısı oluşturuyoruz
 @allow_storage
 @dataclass
 class AuditResult:
@@ -12,21 +11,17 @@ class AuditResult:
     analysis: str
 
 class TokenAuditor(gl.Contract):
-    # Proje URL'lerini ve denetim sonuçlarını tutacağımız eşleme tablosu
     audits: TreeMap[str, AuditResult]
 
     def __init__(self):
-        # Başlangıçta boş bir tablo oluşturuyoruz
         pass
 
     @gl.public.write
     def audit_project(self, project_url: str) -> None:
-        # Eğer proje daha önce denetlendiyse tekrar işlem yapma
         if project_url in self.audits:
             return
 
         def leader_fn():
-            # URL'den web içeriğini çekiyoruz
             web_data = gl.nondet.web.render(project_url, mode="text")
             
             prompt = f"""
@@ -38,33 +33,34 @@ class TokenAuditor(gl.Contract):
             - "is_safe": boolean (true if risk_score is under 50)
             - "analysis": "A short 2-sentence reasoning"
             """
-            # LLM'i JSON formatında yanıt vermeye zorluyoruz
-            res = gl.nondet.exec_prompt(prompt, response_format="json")
-            return res 
+            return gl.nondet.exec_prompt(prompt, response_format="json")
 
         def validator_fn(leader_result) -> bool:
-            # Lider hata verdiyse reddet
             if not isinstance(leader_result, gl.vm.Return):
                 return False
             
             leader_data = leader_result.calldata
-            validator_data = leader_fn() # Doğrulayıcı olarak veriyi kendimiz de çekip analiz ediyoruz
+            leader_score = int(leader_data.get("risk_score", 100))
+            
+            # KESİN KURALLAR (INVARIANTS):
+            # 1. Skor 0-100 arasında olmalı.
+            if not (0 <= leader_score <= 100):
+                return False
+                
+            # 2. is_safe kesinlikle skorun 50'nin altında olması durumuna eşit olmalı.
+            if bool(leader_data.get("is_safe")) != (leader_score < 50):
+                return False
 
-            # 1. Kural: Projenin "Güvenli" (is_safe) kararı kesinlikle eşleşmeli
+            validator_data = leader_fn()
+            
             if leader_data.get("is_safe") != validator_data.get("is_safe"):
                 return False
-            
-            # 2. Kural: Risk skoru LLM'den LLM'e değişebilir, maksimum 15 puanlık sapmaya (tolerans) izin veriyoruz
-            leader_score = int(leader_data.get("risk_score", 100))
+                
             validator_score = int(validator_data.get("risk_score", 100))
-            
-            score_diff = abs(leader_score - validator_score)
-            return score_diff <= 15
+            return abs(leader_score - validator_score) <= 15
 
-        # Özel doğrulamayı çalıştırıyoruz
         result = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
 
-        # Çıkan ve onaylanan sonucu blockchain üzerindeki state'e (duruma) kaydediyoruz
         self.audits[project_url] = AuditResult(
             risk_score=u8(result["risk_score"]),
             is_safe=result["is_safe"],
@@ -73,5 +69,4 @@ class TokenAuditor(gl.Contract):
 
     @gl.public.view
     def get_audit(self, project_url: str) -> TreeMap[str, typing.Any]:
-        # İstenen projenin denetim raporunu okuma metodu
         return self.audits.get(project_url, AuditResult(u8(0), False, "Not audited yet"))
