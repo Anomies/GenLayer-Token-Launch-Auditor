@@ -15,9 +15,10 @@ This contract avoids the pitfall of "blindly trusting the leader" by utilizing a
 
    2. Validator Nodes independently fetch the same website and run their own LLM analysis.
 
-   3. Consensus Rules:
-      - Strict Matching: The is_safe boolean MUST match exactly. If the leader says a project is safe but a validator disagrees, the validator rejects the proposal.
-      - Numeric Tolerance: Recognizing that LLM scoring is subjective, the validators allow a maximum risk_score divergence of ±15 points. The analysis text is stored for context but ignored during equivalence checks to prevent consensus failures due to phrasing differences.
+   3. **Consensus Rules & Invariants:**
+   * **Strict Invariant Enforcement:** The validator strictly enforces the 0–100 score range and ensures the invariant that `is_safe` is `true` *if and only if* the accepted `risk_score` is strictly below 50. If a          leader proposes contradictory data (e.g., a score of 60 marked as safe), the validator instantly rejects the proposal to guarantee one consistent safety outcome.
+   * **Strict Boolean Matching:** Both the leader and the validator must independently reach the exact same `is_safe` conclusion. 
+   * **Numeric Tolerance:** Recognizing that LLM scoring is subjective, the validators allow a maximum `risk_score` divergence of ±15 points, provided all the strict invariants and boolean matches mentioned above hold      true.
 
 Contract Usage
 1. *audit_project(project_url: str)*
